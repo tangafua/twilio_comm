@@ -12,6 +12,7 @@ const TwilioVoice: React.FC<TwilioVoiceProps> = ({ phoneNumber, onCallStarted, o
   const [device, setDevice] = useState<Device | null>(null);
   const [isCalling, setIsCalling] = useState(false);
   const [status, setStatus] = useState('');
+  const [textToSpeech, setTextToSpeech] = useState('');
 
   useEffect(() => {
     const initializeDevice = async () => {
@@ -20,7 +21,6 @@ const TwilioVoice: React.FC<TwilioVoiceProps> = ({ phoneNumber, onCallStarted, o
         const { token } = await response.json();
    
         console.log('Received Token:', token);
-   
 
         if (typeof token !== 'string') {
           throw new Error('Token is not a valid string');
@@ -64,7 +64,6 @@ const TwilioVoice: React.FC<TwilioVoiceProps> = ({ phoneNumber, onCallStarted, o
    
   }, []); // Empty dependency array to run once on mount
 
-  // Start the call
   const startCall = async () => {
     if (!device || !phoneNumber) return;
 
@@ -77,7 +76,7 @@ const TwilioVoice: React.FC<TwilioVoiceProps> = ({ phoneNumber, onCallStarted, o
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ to: phoneNumber }),
+        body: JSON.stringify({ to: phoneNumber, text: textToSpeech }), // 传递 TTS 文本
       });
 
       const result = await response.json();
@@ -110,9 +109,16 @@ const TwilioVoice: React.FC<TwilioVoiceProps> = ({ phoneNumber, onCallStarted, o
       <div className="status-box" style={{ marginBottom: '10px', fontSize: '18px' }}>
         {status}
       </div>
+      <input
+        type="text"
+        value={textToSpeech}
+        onChange={(e) => setTextToSpeech(e.target.value)}
+        placeholder="输入要说的话"
+        style={{ marginBottom: '10px', padding: '10px', fontSize: '16px', width: '80%' }}
+      />
       <button
         onClick={isCalling ? endCall : startCall}
-        disabled={!device || !phoneNumber}
+        disabled={!device || !phoneNumber || !textToSpeech}
         className={`call-btn ${isCalling ? 'end' : 'start'}`}
         style={{
           padding: '10px 20px',
@@ -125,9 +131,9 @@ const TwilioVoice: React.FC<TwilioVoiceProps> = ({ phoneNumber, onCallStarted, o
         }}
       >
         {isCalling ? '挂断' : '呼叫'}
-      </button>
-    </div>
-  );
-};
+        </button>
+      </div>
+    );
+    };
 
 export default TwilioVoice;
