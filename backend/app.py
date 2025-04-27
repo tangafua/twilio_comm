@@ -1,25 +1,37 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
 from twilio.rest import Client
 import os
 from dotenv import load_dotenv
-from twilio.twiml.voice_response import VoiceResponse, Start, Stream
-import threading
-import queue
+from twilio.twiml.voice_response import VoiceResponse
+from urllib.parse import quote
 
 load_dotenv()
+
 app = Flask(__name__)
 CORS(app)
 
-# 全局队列，用于存储待转换的TTS文本
-tts_queue = queue.Queue()
+REQUIRED_ENV = [
+    'TWILIO_ACCOUNT_SID',
+    'TWILIO_API_KEY_SID',
+    'TWILIO_API_KEY_SECRET',
+    'TWILIO_TWIML_APP_SID',
+    'TWILIO_AUTH_TOKEN',
+    'TWILIO_PHONE_NUMBER',
+    'YOUR_SERVER_URL'
+]
+
+for var in REQUIRED_ENV:
+    if not os.getenv(var):
+        raise EnvironmentError(f"Missing required environment variable: {var}")
+
 client = Client(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
 
 @app.route('/token', methods=['GET'])
 def generate_token():
-    identity = request.args.get('identity', 'default_user')
+    identity = request.args.get('identity', 'default_user')  # Default identity if none provided
     try:
         token = AccessToken(
             os.getenv('TWILIO_ACCOUNT_SID'),
@@ -33,7 +45,6 @@ def generate_token():
             incoming_allow=True
         )
         token.add_grant(voice_grant)
-        
         token_str = token.to_jwt()
         print("Generated Token:", token_str) 
 
@@ -46,48 +57,45 @@ def generate_token():
 @app.route('/call', methods=['POST'])
 def initiate_call():
     try:
-        data = request.get_json()
+        data = request.json
         to_number = data['to']
+        text = data.get('text', '')
         from_number = os.getenv('TWILIO_PHONE_NUMBER')
         
-        if not to_number.startswith('+'):
-            return jsonify({'error': 'Phone number must include country code'}), 400
-
-        response = VoiceResponse()
-        response.say("实时语音转换已连接", voice='alice')
-        
-        # 添加媒体流
-        response.start().stream(
-            url=f"wss://{request.host}/stream",
-            name='live_tts'
-        )
+        # 生成安全的TwiML URL
+        base_url = os.getenv('YOUR_SERVER_URL')
+        encoded_text = quote(text) 
+        twiml_url = f"{base_url}/voice?text={encoded_text}"
         
         call = client.calls.create(
             to=to_number,
             from_=from_number,
-            twiml=str(response)
+            url=twiml_url
         )
         
         return jsonify({
             'status': 'success',
-            'call_sid': call.sid,
-            'message': 'Call initiated with live TTS'
+            'call_sid': call.sid,  
+            'message': '通话已发起'
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/push_tts', methods=['POST'])
-def push_tts():
-    data = request.get_json()
-    tts_queue.put(data['text'])
-    return jsonify({'status': 'success'})
-
-# 模拟WebSocket端点（实际部署需要真正的WebSocket支持）
-@app.route('/stream', methods=['GET', 'POST'])
-def stream():
-    # 实际部署时应替换为真正的WebSocket实现
-    text = tts_queue.get()
-    return jsonify({'text': text})
-
+@app.route('/send-text', methods=['POST'])
+def handle_live_text():
+    data = request.json
+    call_sid = data['callSid']
+    text = data['text']
+    
+    try:
+        # 使用Twilio API更新通话
+        client.calls(call_sid).update(
+            twiml=f'<Response><Say language="zh-CN" voice="Polly.Zhiyu">{text}</Say></Response>'
+        )
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
+    
